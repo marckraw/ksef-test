@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using KsefIntegration.Abstractions;
@@ -53,6 +55,8 @@ namespace KsefIntegration.Services
 
             try
             {
+                var operationStartedAtUtc = DateTime.UtcNow;
+
                 await Task.Run(
                     () => File.WriteAllText(tempXmlPath, invoiceXml),
                     cancellationToken).ConfigureAwait(false);
@@ -68,6 +72,9 @@ namespace KsefIntegration.Services
                     RedirectStandardError = true,
                     CreateNoWindow = true,
                 };
+
+                string lastStdout = string.Empty;
+                string lastStderr = string.Empty;
 
                 using (var process = new Process())
                 {
@@ -98,18 +105,56 @@ namespace KsefIntegration.Services
 
                     var stdout = await stdoutTask.ConfigureAwait(false);
                     var stderr = await stderrTask.ConfigureAwait(false);
+                    lastStdout = stdout ?? string.Empty;
+                    lastStderr = stderr ?? string.Empty;
 
                     if (process.ExitCode != 0)
                     {
                         throw new InvalidOperationException(
-                            $"PDF generator failed with exit code {process.ExitCode}. stderr: {stderr}. stdout: {stdout}");
+                            BuildProcessFailureMessage(
+                                process.ExitCode,
+                                startInfo.FileName,
+                                startInfo.Arguments,
+                                lastStderr,
+                                lastStdout));
+                    }
+
+                    if (!File.Exists(outputPdfPath))
+                    {
+                        var recoveredPath = TryRecoverOutputPdfPath(outputPdfPath, operationStartedAtUtc, lastStdout, lastStderr);
+                        if (!string.IsNullOrWhiteSpace(recoveredPath) && File.Exists(recoveredPath))
+                        {
+                            if (!Path.GetFullPath(recoveredPath).Equals(Path.GetFullPath(outputPdfPath), StringComparison.OrdinalIgnoreCase))
+                            {
+                                var outputDir = Path.GetDirectoryName(outputPdfPath);
+                                if (!string.IsNullOrWhiteSpace(outputDir))
+                                {
+                                    Directory.CreateDirectory(outputDir);
+                                }
+
+                                if (File.Exists(outputPdfPath))
+                                {
+                                    File.Delete(outputPdfPath);
+                                }
+
+                                File.Move(recoveredPath, outputPdfPath);
+                            }
+                        }
                     }
                 }
 
                 if (!File.Exists(outputPdfPath))
                 {
                     throw new FileNotFoundException(
-                        "PDF generator finished successfully but output file was not created.",
+                        "PDF generator finished successfully but output file was not created. "
+                        + "Command: "
+                        + startInfo.FileName
+                        + " "
+                        + startInfo.Arguments
+                        + ". stderr: "
+                        + Truncate(lastStderr, 1500)
+                        + ". stdout: "
+                        + Truncate(lastStdout, 1500),
                         outputPdfPath);
                 }
 
@@ -163,6 +208,99 @@ namespace KsefIntegration.Services
             {
                 // Best-effort cleanup only.
             }
+        }
+
+        private static string BuildProcessFailureMessage(
+            int exitCode,
+            string? command,
+            string? arguments,
+            string? stderr,
+            string? stdout)
+        {
+            return "PDF generator failed with exit code "
+                + exitCode
+                + ". Command: "
+                + (command ?? "<null>")
+                + " "
+                + (arguments ?? string.Empty)
+                + ". stderr: "
+                + (stderr ?? string.Empty)
+                + ". stdout: "
+                + (stdout ?? string.Empty);
+        }
+
+        private static string? TryRecoverOutputPdfPath(
+            string desiredOutputPath,
+            DateTime operationStartedAtUtc,
+            string stdout,
+            string stderr)
+        {
+            var fromStdout = ExtractPdfPathFromText(stdout);
+            if (!string.IsNullOrWhiteSpace(fromStdout) && File.Exists(fromStdout))
+            {
+                return fromStdout;
+            }
+
+            var fromStderr = ExtractPdfPathFromText(stderr);
+            if (!string.IsNullOrWhiteSpace(fromStderr) && File.Exists(fromStderr))
+            {
+                return fromStderr;
+            }
+
+            var desiredDir = Path.GetDirectoryName(desiredOutputPath);
+            if (string.IsNullOrWhiteSpace(desiredDir) || !Directory.Exists(desiredDir))
+            {
+                return null;
+            }
+
+            var candidates = new List<FileInfo>();
+            foreach (var filePath in Directory.GetFiles(desiredDir, "*.pdf"))
+            {
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.LastWriteTimeUtc >= operationStartedAtUtc.AddSeconds(-2))
+                {
+                    candidates.Add(fileInfo);
+                }
+            }
+
+            if (candidates.Count == 0)
+            {
+                return null;
+            }
+
+            return candidates
+                .OrderByDescending(c => c.LastWriteTimeUtc)
+                .First()
+                .FullName;
+        }
+
+        private static string? ExtractPdfPathFromText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return null;
+            }
+
+            var parts = text.Split(new[] { '\r', '\n', '\t', ' ', '"', '\'' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var part in parts)
+            {
+                if (part.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) && Path.IsPathRooted(part))
+                {
+                    return part;
+                }
+            }
+
+            return null;
+        }
+
+        private static string Truncate(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+            {
+                return value;
+            }
+
+            return value.Substring(0, maxLength) + "...";
         }
     }
 }
