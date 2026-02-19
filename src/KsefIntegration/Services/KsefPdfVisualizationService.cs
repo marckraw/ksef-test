@@ -45,120 +45,20 @@ namespace KsefIntegration.Services
 
             options = options ?? new PdfRenderOptions();
 
-            var outputDirectory = Path.GetDirectoryName(outputPdfPath);
-            if (!string.IsNullOrWhiteSpace(outputDirectory))
-            {
-                Directory.CreateDirectory(outputDirectory);
-            }
-
             var tempXmlPath = Path.Combine(Path.GetTempPath(), $"ksef-{Guid.NewGuid():N}.xml");
 
             try
             {
-                var operationStartedAtUtc = DateTime.UtcNow;
-
                 await Task.Run(
                     () => File.WriteAllText(tempXmlPath, invoiceXml),
                     cancellationToken).ConfigureAwait(false);
 
-                var arguments = BuildArguments(tempXmlPath, outputPdfPath, ksefNumber, options);
-
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = _settings.CommandPath,
-                    Arguments = arguments,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true,
-                };
-
-                string lastStdout = string.Empty;
-                string lastStderr = string.Empty;
-
-                using (var process = new Process())
-                {
-                    process.StartInfo = startInfo;
-                    process.Start();
-
-                    var stdoutTask = process.StandardOutput.ReadToEndAsync();
-                    var stderrTask = process.StandardError.ReadToEndAsync();
-
-                    var timeoutMs = Math.Max(1, _settings.TimeoutSeconds) * 1000;
-                    bool exited;
-                    try
-                    {
-                        exited = await Task.Run(() => process.WaitForExit(timeoutMs), cancellationToken)
-                            .ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        TryKill(process);
-                        throw;
-                    }
-
-                    if (!exited)
-                    {
-                        TryKill(process);
-                        throw new TimeoutException("PDF generator process timed out.");
-                    }
-
-                    var stdout = await stdoutTask.ConfigureAwait(false);
-                    var stderr = await stderrTask.ConfigureAwait(false);
-                    lastStdout = stdout ?? string.Empty;
-                    lastStderr = stderr ?? string.Empty;
-
-                    if (process.ExitCode != 0)
-                    {
-                        throw new InvalidOperationException(
-                            BuildProcessFailureMessage(
-                                process.ExitCode,
-                                startInfo.FileName,
-                                startInfo.Arguments,
-                                lastStderr,
-                                lastStdout));
-                    }
-
-                    if (!File.Exists(outputPdfPath))
-                    {
-                        var recoveredPath = TryRecoverOutputPdfPath(outputPdfPath, operationStartedAtUtc, lastStdout, lastStderr);
-                        if (!string.IsNullOrWhiteSpace(recoveredPath) && File.Exists(recoveredPath))
-                        {
-                            if (!Path.GetFullPath(recoveredPath).Equals(Path.GetFullPath(outputPdfPath), StringComparison.OrdinalIgnoreCase))
-                            {
-                                var outputDir = Path.GetDirectoryName(outputPdfPath);
-                                if (!string.IsNullOrWhiteSpace(outputDir))
-                                {
-                                    Directory.CreateDirectory(outputDir);
-                                }
-
-                                if (File.Exists(outputPdfPath))
-                                {
-                                    File.Delete(outputPdfPath);
-                                }
-
-                                File.Move(recoveredPath, outputPdfPath);
-                            }
-                        }
-                    }
-                }
-
-                if (!File.Exists(outputPdfPath))
-                {
-                    throw new FileNotFoundException(
-                        "PDF generator finished successfully but output file was not created. "
-                        + "Command: "
-                        + startInfo.FileName
-                        + " "
-                        + startInfo.Arguments
-                        + ". stderr: "
-                        + Truncate(lastStderr, 1500)
-                        + ". stdout: "
-                        + Truncate(lastStdout, 1500),
-                        outputPdfPath);
-                }
-
-                return outputPdfPath;
+                return await GeneratePdfFromXmlFileAsync(
+                    tempXmlPath,
+                    outputPdfPath,
+                    ksefNumber,
+                    options,
+                    cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -167,6 +67,142 @@ namespace KsefIntegration.Services
                     File.Delete(tempXmlPath);
                 }
             }
+        }
+
+        public async Task<string> GeneratePdfFromXmlFileAsync(
+            string inputXmlPath,
+            string outputPdfPath,
+            string ksefNumber,
+            PdfRenderOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(inputXmlPath))
+            {
+                throw new ArgumentException("Input XML path cannot be empty.", nameof(inputXmlPath));
+            }
+
+            if (!File.Exists(inputXmlPath))
+            {
+                throw new FileNotFoundException("Input XML file does not exist.", inputXmlPath);
+            }
+
+            if (string.IsNullOrWhiteSpace(outputPdfPath))
+            {
+                throw new ArgumentException("Output PDF path cannot be empty.", nameof(outputPdfPath));
+            }
+
+            if (string.IsNullOrWhiteSpace(ksefNumber))
+            {
+                throw new ArgumentException("KSeF number cannot be empty.", nameof(ksefNumber));
+            }
+
+            options = options ?? new PdfRenderOptions();
+
+            var outputDirectory = Path.GetDirectoryName(outputPdfPath);
+            if (!string.IsNullOrWhiteSpace(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            var operationStartedAtUtc = DateTime.UtcNow;
+            var arguments = BuildArguments(inputXmlPath, outputPdfPath, ksefNumber, options);
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = _settings.CommandPath,
+                Arguments = arguments,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+
+            string lastStdout = string.Empty;
+            string lastStderr = string.Empty;
+
+            using (var process = new Process())
+            {
+                process.StartInfo = startInfo;
+                process.Start();
+
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+
+                var timeoutMs = Math.Max(1, _settings.TimeoutSeconds) * 1000;
+                bool exited;
+                try
+                {
+                    exited = await Task.Run(() => process.WaitForExit(timeoutMs), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    TryKill(process);
+                    throw;
+                }
+
+                if (!exited)
+                {
+                    TryKill(process);
+                    throw new TimeoutException("PDF generator process timed out.");
+                }
+
+                var stdout = await stdoutTask.ConfigureAwait(false);
+                var stderr = await stderrTask.ConfigureAwait(false);
+                lastStdout = stdout ?? string.Empty;
+                lastStderr = stderr ?? string.Empty;
+
+                if (process.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(
+                        BuildProcessFailureMessage(
+                            process.ExitCode,
+                            startInfo.FileName,
+                            startInfo.Arguments,
+                            lastStderr,
+                            lastStdout));
+                }
+
+                if (!File.Exists(outputPdfPath))
+                {
+                    var recoveredPath = TryRecoverOutputPdfPath(outputPdfPath, operationStartedAtUtc, lastStdout, lastStderr);
+                    if (!string.IsNullOrWhiteSpace(recoveredPath) && File.Exists(recoveredPath))
+                    {
+                        if (!Path.GetFullPath(recoveredPath).Equals(Path.GetFullPath(outputPdfPath), StringComparison.OrdinalIgnoreCase))
+                        {
+                            var outputDir = Path.GetDirectoryName(outputPdfPath);
+                            if (!string.IsNullOrWhiteSpace(outputDir))
+                            {
+                                Directory.CreateDirectory(outputDir);
+                            }
+
+                            if (File.Exists(outputPdfPath))
+                            {
+                                File.Delete(outputPdfPath);
+                            }
+
+                            File.Move(recoveredPath, outputPdfPath);
+                        }
+                    }
+                }
+            }
+
+            if (!File.Exists(outputPdfPath))
+            {
+                throw new FileNotFoundException(
+                    "PDF generator finished successfully but output file was not created. "
+                    + "Command: "
+                    + startInfo.FileName
+                    + " "
+                    + startInfo.Arguments
+                    + ". stderr: "
+                    + Truncate(lastStderr, 1500)
+                    + ". stdout: "
+                    + Truncate(lastStdout, 1500),
+                    outputPdfPath);
+            }
+
+            return outputPdfPath;
         }
 
         private string BuildArguments(string inputXmlPath, string outputPdfPath, string ksefNumber, PdfRenderOptions options)

@@ -219,17 +219,34 @@ namespace KsefWinFormsApp
                 }
 
                 AppendLog("Krok 2/2: Generowanie PDF...");
-                var resultPath = await pdfService.GeneratePdfAsync(
-                    invoiceXml,
-                    outputPath,
-                    ksefNumber,
-                    new PdfRenderOptions
-                    {
-                        IncludeQrCode = _settings.IncludeQrCode,
-                        IncludeKsefMetadata = _settings.IncludeKsefMetadata,
-                        AdditionalArguments = BuildAdditionalDataArgument(ksefNumber),
-                    },
-                    CancellationToken.None);
+                var pdfOptions = new PdfRenderOptions
+                {
+                    IncludeQrCode = _settings.IncludeQrCode,
+                    IncludeKsefMetadata = _settings.IncludeKsefMetadata,
+                    AdditionalArguments = BuildAdditionalDataArgument(ksefNumber),
+                };
+
+                string resultPath;
+                if (!string.IsNullOrWhiteSpace(savedXmlPath))
+                {
+                    AppendLog("PDF użyje XML z ustawionego folderu: " + savedXmlPath);
+                    resultPath = await pdfService.GeneratePdfFromXmlFileAsync(
+                        savedXmlPath,
+                        outputPath,
+                        ksefNumber,
+                        pdfOptions,
+                        CancellationToken.None);
+                }
+                else
+                {
+                    AppendLog("PDF użyje XML tymczasowego (zapis XML wyłączony).");
+                    resultPath = await pdfService.GeneratePdfAsync(
+                        invoiceXml,
+                        outputPath,
+                        ksefNumber,
+                        pdfOptions,
+                        CancellationToken.None);
+                }
 
                 AppendLog("Sukces: PDF wygenerowany -> " + resultPath);
                 _lblStatus.Text = "Sukces: " + resultPath;
