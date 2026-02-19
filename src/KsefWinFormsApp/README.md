@@ -2,20 +2,47 @@
 
 Minimalny projekt WinForms (VS2022) do pobrania faktury z KSeF po numerze KSeF i wygenerowania PDF.
 
-## Co zawiera UI
+## UI po zmianie
 
-1. Pole `Numer KSeF faktury`.
-2. Przycisk `Pobierz fakturę PDF`.
-3. Dodatkowe pola wymagane do działania MVP: `NIP`, `Token KSeF`, `Base URL`, ścieżki generatora PDF.
+1. Ekran główny:
+   - `Numer KSeF faktury`
+   - `Wyjściowy plik PDF`
+   - przycisk `Pobierz fakturę PDF`
+   - przycisk `Ustawienia...`
+2. Ekran `Ustawienia...`:
+   - `KSeF Base URL`
+   - `NIP`
+   - `Token KSeF`
+   - `Polecenie PDF` (np. `node`)
+   - `Ścieżka wrappera PDF (.mjs/.js)`
+   - `Szablon argumentów`
+   - opcje `Dołącz kod QR` i `Dołącz metadane KSeF`
+
+## Trwałość ustawień
+
+Ustawienia zapisują się do lokalnego pliku JSON:
+
+`%LOCALAPPDATA%\\KsefWinFormsApp\\settings.json`
 
 ## Uruchomienie
 
 1. Otwórz `KsefWinForms.sln` w VS2022.
 2. Przywróć NuGet packages.
 3. Ustaw `KsefWinFormsApp` jako startup project.
-4. Uzupełnij pola w UI:
-   - NIP,
-   - token KSeF,
-   - numer KSeF faktury,
-   - ścieżkę do skryptu CLI oficjalnego generatora PDF MF.
-5. Kliknij `Pobierz fakturę PDF`.
+4. W aplikacji kliknij `Ustawienia...` i uzupełnij dane integracyjne.
+5. Na ekranie głównym wpisz `Numer KSeF faktury` i wybierz plik wynikowy PDF.
+6. Kliknij `Pobierz fakturę PDF`.
+
+## Generator PDF MF - co wpisać
+
+1. `Polecenie PDF`: `node`
+2. `Ścieżka wrappera PDF`: np. `C:\tools\ksef-pdf-generator\dist\index.js`
+3. `Szablon argumentów`:
+
+```text
+{script} faktura {input} {output} {extra}
+```
+
+Szczegółowa instrukcja instalacji generatora:
+
+- `docs/PDF_GENERATOR_SETUP_PL.md`

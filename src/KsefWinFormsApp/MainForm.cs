@@ -13,36 +13,38 @@ namespace KsefWinFormsApp
 {
     public sealed class MainForm : Form
     {
-        private readonly TextBox _txtBaseUrl = new TextBox();
-        private readonly TextBox _txtNip = new TextBox();
-        private readonly TextBox _txtToken = new TextBox();
         private readonly TextBox _txtKsefNumber = new TextBox();
-        private readonly TextBox _txtPdfScriptPath = new TextBox();
-        private readonly TextBox _txtPdfArgumentsTemplate = new TextBox();
         private readonly TextBox _txtOutputPdfPath = new TextBox();
 
-        private readonly CheckBox _chkIncludeQr = new CheckBox();
-        private readonly CheckBox _chkIncludeMetadata = new CheckBox();
-
-        private readonly Button _btnBrowseScript = new Button();
         private readonly Button _btnBrowseOutput = new Button();
+        private readonly Button _btnSettings = new Button();
         private readonly Button _btnDownloadPdf = new Button();
 
+        private readonly Label _lblConfigSummary = new Label();
         private readonly Label _lblStatus = new Label();
 
         private readonly HttpClient _httpClient;
 
+        private AppSettings _settings;
+
         public MainForm()
         {
             _httpClient = new HttpClient();
+            _settings = AppSettingsStore.Load();
+
+            if (string.IsNullOrWhiteSpace(_settings.DefaultOutputPdfPath))
+            {
+                _settings.DefaultOutputPdfPath = GetDefaultOutputPath();
+            }
+
             Text = "KSeF Invoice Downloader (MVP)";
-            Width = 980;
-            Height = 640;
-            MinimumSize = new Size(900, 620);
+            Width = 900;
+            Height = 420;
+            MinimumSize = new Size(840, 380);
             StartPosition = FormStartPosition.CenterScreen;
 
             BuildLayout();
-            SetDefaults();
+            ApplySettingsToUi();
         }
 
         protected override void Dispose(bool disposing)
@@ -61,55 +63,49 @@ namespace KsefWinFormsApp
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 3,
-                RowCount = 12,
+                RowCount = 8,
                 Padding = new Padding(12),
             };
 
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
 
-            for (var i = 0; i < 11; i++)
+            for (var i = 0; i < 7; i++)
             {
                 root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             }
 
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            AddField(root, 0, "KSeF Base URL", _txtBaseUrl);
-            AddField(root, 1, "NIP", _txtNip);
-            AddField(root, 2, "Token KSeF", _txtToken);
-            AddField(root, 3, "Numer KSeF faktury", _txtKsefNumber);
-            AddField(root, 4, "Ścieżka CLI generatora PDF", _txtPdfScriptPath);
-            AddField(root, 5, "Szablon argumentów CLI", _txtPdfArgumentsTemplate);
-            AddField(root, 6, "Wyjściowy plik PDF", _txtOutputPdfPath);
-
-            _btnBrowseScript.Text = "Wybierz...";
-            _btnBrowseScript.Click += BrowseScriptClick;
-            root.Controls.Add(_btnBrowseScript, 2, 4);
+            AddField(root, 0, "Numer KSeF faktury", _txtKsefNumber);
+            AddField(root, 1, "Wyjściowy plik PDF", _txtOutputPdfPath);
 
             _btnBrowseOutput.Text = "Wybierz...";
             _btnBrowseOutput.Click += BrowseOutputClick;
-            root.Controls.Add(_btnBrowseOutput, 2, 6);
+            root.Controls.Add(_btnBrowseOutput, 2, 1);
 
-            _chkIncludeQr.Text = "Dołącz kod QR";
-            _chkIncludeQr.Checked = true;
-            root.Controls.Add(_chkIncludeQr, 1, 7);
+            _btnSettings.Text = "Ustawienia...";
+            _btnSettings.Height = 36;
+            _btnSettings.Click += OpenSettingsClick;
+            root.Controls.Add(_btnSettings, 1, 2);
 
-            _chkIncludeMetadata.Text = "Dołącz metadane KSeF";
-            _chkIncludeMetadata.Checked = true;
-            root.Controls.Add(_chkIncludeMetadata, 1, 8);
+            _lblConfigSummary.Text = "Konfiguracja: brak";
+            _lblConfigSummary.AutoEllipsis = true;
+            _lblConfigSummary.Dock = DockStyle.Fill;
+            _lblConfigSummary.TextAlign = ContentAlignment.MiddleLeft;
+            root.Controls.Add(_lblConfigSummary, 1, 3);
 
             _btnDownloadPdf.Text = "Pobierz fakturę PDF";
             _btnDownloadPdf.Height = 38;
             _btnDownloadPdf.Click += DownloadPdfClick;
-            root.Controls.Add(_btnDownloadPdf, 1, 9);
+            root.Controls.Add(_btnDownloadPdf, 1, 4);
 
             _lblStatus.Text = "Gotowe.";
             _lblStatus.AutoEllipsis = true;
             _lblStatus.Dock = DockStyle.Fill;
             _lblStatus.TextAlign = ContentAlignment.MiddleLeft;
-            root.Controls.Add(_lblStatus, 1, 10);
+            root.Controls.Add(_lblStatus, 1, 5);
 
             Controls.Add(root);
         }
@@ -129,12 +125,14 @@ namespace KsefWinFormsApp
             root.Controls.Add(textBox, 1, row);
         }
 
-        private void SetDefaults()
+        private void ApplySettingsToUi()
         {
-            _txtBaseUrl.Text = "https://api-test.ksef.mf.gov.pl/api/v2";
-            _txtToken.UseSystemPasswordChar = true;
-            _txtPdfArgumentsTemplate.Text = "{script} --input {input} --output {output} --ksef {ksefNumber} {extra}";
-            _txtOutputPdfPath.Text = GetDefaultOutputPath();
+            if (string.IsNullOrWhiteSpace(_txtOutputPdfPath.Text))
+            {
+                _txtOutputPdfPath.Text = _settings.DefaultOutputPdfPath;
+            }
+
+            _lblConfigSummary.Text = BuildConfigSummary(_settings);
         }
 
         private async void DownloadPdfClick(object? sender, EventArgs e)
@@ -157,8 +155,9 @@ namespace KsefWinFormsApp
                     outputPath,
                     new PdfRenderOptions
                     {
-                        IncludeQrCode = _chkIncludeQr.Checked,
-                        IncludeKsefMetadata = _chkIncludeMetadata.Checked,
+                        IncludeQrCode = _settings.IncludeQrCode,
+                        IncludeKsefMetadata = _settings.IncludeKsefMetadata,
+                        AdditionalArguments = BuildAdditionalDataArgument(ksefNumber),
                     },
                     CancellationToken.None);
 
@@ -169,6 +168,9 @@ namespace KsefWinFormsApp
                     "Sukces",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
+
+                _settings.DefaultOutputPdfPath = outputPath;
+                AppSettingsStore.Save(_settings);
             }
             catch (KsefApiException ex)
             {
@@ -189,35 +191,73 @@ namespace KsefWinFormsApp
             }
         }
 
+        private void OpenSettingsClick(object? sender, EventArgs e)
+        {
+            using var dialog = new SettingsForm(_settings);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            _settings = dialog.Settings;
+            if (string.IsNullOrWhiteSpace(_settings.DefaultOutputPdfPath))
+            {
+                _settings.DefaultOutputPdfPath = GetDefaultOutputPath();
+            }
+
+            AppSettingsStore.Save(_settings);
+            _txtOutputPdfPath.Text = _settings.DefaultOutputPdfPath;
+            _lblConfigSummary.Text = BuildConfigSummary(_settings);
+            _lblStatus.Text = "Ustawienia zapisane.";
+        }
+
         private bool ValidateInputs()
         {
-            if (string.IsNullOrWhiteSpace(_txtNip.Text))
-            {
-                MessageBox.Show(this, "Wpisz NIP.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
-            }
-
-            if (string.IsNullOrWhiteSpace(_txtToken.Text))
-            {
-                MessageBox.Show(this, "Wpisz token KSeF.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
-            }
-
             if (string.IsNullOrWhiteSpace(_txtKsefNumber.Text))
             {
                 MessageBox.Show(this, "Wpisz numer KSeF faktury.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(_txtPdfScriptPath.Text))
-            {
-                MessageBox.Show(this, "Wskaż ścieżkę do skryptu CLI generatora PDF.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
-            }
-
             if (string.IsNullOrWhiteSpace(_txtOutputPdfPath.Text))
             {
                 MessageBox.Show(this, "Wskaż ścieżkę docelowego pliku PDF.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_settings.BaseUrl))
+            {
+                MessageBox.Show(this, "Uzupełnij KSeF Base URL w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_settings.Nip))
+            {
+                MessageBox.Show(this, "Uzupełnij NIP w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_settings.KsefToken))
+            {
+                MessageBox.Show(this, "Uzupełnij token KSeF w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_settings.PdfCommandPath))
+            {
+                MessageBox.Show(this, "Uzupełnij polecenie PDF (np. node) w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_settings.PdfScriptPath))
+            {
+                MessageBox.Show(this, "Uzupełnij ścieżkę skryptu PDF (.js/.mjs) w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_settings.PdfArgumentsTemplate))
+            {
+                MessageBox.Show(this, "Uzupełnij szablon argumentów w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
@@ -228,9 +268,9 @@ namespace KsefWinFormsApp
         {
             var ksefSettings = new KsefSettings
             {
-                BaseUrl = _txtBaseUrl.Text.Trim(),
-                Nip = _txtNip.Text.Trim(),
-                KsefToken = _txtToken.Text.Trim(),
+                BaseUrl = _settings.BaseUrl.Trim(),
+                Nip = _settings.Nip.Trim(),
+                KsefToken = _settings.KsefToken.Trim(),
                 SubjectIdentifierType = "onip",
                 RequestTimeoutSeconds = 60,
                 AuthStatusPollDelayMs = 1000,
@@ -241,9 +281,9 @@ namespace KsefWinFormsApp
 
             var pdfSettings = new PdfGeneratorSettings
             {
-                CommandPath = "node",
-                ScriptPath = _txtPdfScriptPath.Text.Trim(),
-                ArgumentsTemplate = _txtPdfArgumentsTemplate.Text.Trim(),
+                CommandPath = _settings.PdfCommandPath.Trim(),
+                ScriptPath = _settings.PdfScriptPath.Trim(),
+                ArgumentsTemplate = _settings.PdfArgumentsTemplate.Trim(),
                 TimeoutSeconds = 60,
             };
 
@@ -253,27 +293,12 @@ namespace KsefWinFormsApp
         private void ToggleBusy(bool busy)
         {
             _btnDownloadPdf.Enabled = !busy;
-            _btnBrowseScript.Enabled = !busy;
             _btnBrowseOutput.Enabled = !busy;
+            _btnSettings.Enabled = !busy;
             Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
             if (busy)
             {
                 _lblStatus.Text = "Przetwarzanie...";
-            }
-        }
-
-        private void BrowseScriptClick(object? sender, EventArgs e)
-        {
-            using var dialog = new OpenFileDialog
-            {
-                Filter = "Node script (*.js)|*.js|Wszystkie pliki (*.*)|*.*",
-                CheckFileExists = true,
-                Multiselect = false,
-            };
-
-            if (dialog.ShowDialog(this) == DialogResult.OK)
-            {
-                _txtPdfScriptPath.Text = dialog.FileName;
             }
         }
 
@@ -296,6 +321,30 @@ namespace KsefWinFormsApp
             {
                 _txtOutputPdfPath.Text = dialog.FileName;
             }
+        }
+
+        private static string BuildConfigSummary(AppSettings settings)
+        {
+            var nipPart = string.IsNullOrWhiteSpace(settings.Nip) ? "NIP: brak" : "NIP: " + settings.Nip;
+            var tokenPart = string.IsNullOrWhiteSpace(settings.KsefToken) ? "token: brak" : "token: ustawiony";
+            var scriptPart = string.IsNullOrWhiteSpace(settings.PdfScriptPath) ? "PDF CLI: brak" : "PDF CLI: ustawiony";
+
+            return "Konfiguracja -> " + nipPart + ", " + tokenPart + ", " + scriptPart;
+        }
+
+        private static string BuildAdditionalDataArgument(string ksefNumber)
+        {
+            if (string.IsNullOrWhiteSpace(ksefNumber))
+            {
+                return string.Empty;
+            }
+
+            var escapedKsefNumber = ksefNumber
+                .Replace("\\", "\\\\")
+                .Replace("\"", "\\\"");
+
+            var json = "{\"nrKSeF\":\"" + escapedKsefNumber + "\"}";
+            return "\"" + json.Replace("\"", "\\\"") + "\"";
         }
 
         private static string GetDefaultOutputPath()

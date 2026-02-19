@@ -18,7 +18,8 @@ Ten moduł implementuje procedurę:
 1. Token KSeF operator wpisuje ręcznie w UI.
 2. Dostęp do środowiska `TEST` lub `DEMO` (zależnie od etapu).
 3. Zainstalowany Node.js na stanowisku.
-4. Dostępny lokalnie oficjalny generator PDF MF i ścieżka do jego skryptu CLI.
+4. Dostępny lokalnie oficjalny generator PDF MF i ścieżka do jego skryptu `.js`/`.mjs`.
+5. Szczegóły instalacji/argumentów: `docs/PDF_GENERATOR_SETUP_PL.md`.
 
 ## 3. Przykładowe podpięcie pod przycisk WinForms
 
@@ -60,8 +61,8 @@ public partial class MainForm : Form
         var pdfSettings = new PdfGeneratorSettings
         {
             CommandPath = "node",
-            ScriptPath = @"C:\tools\ksef-pdf-generator\dist\cli.js",
-            ArgumentsTemplate = "{script} --input {input} --output {output} --ksef {ksefNumber}",
+            ScriptPath = @"C:\tools\ksef-pdf-generator\dist\index.js",
+            ArgumentsTemplate = "{script} faktura {input} {output} {extra}",
             TimeoutSeconds = 60,
         };
 

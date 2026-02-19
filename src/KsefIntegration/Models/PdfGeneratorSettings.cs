@@ -6,7 +6,7 @@ namespace KsefIntegration.Models
 
         public string ScriptPath { get; set; } = string.Empty;
 
-        public string ArgumentsTemplate { get; set; } = "{script} --input {input} --output {output}";
+        public string ArgumentsTemplate { get; set; } = "{script} faktura {input} {output} {extra}";
 
         public int TimeoutSeconds { get; set; } = 60;
     }
