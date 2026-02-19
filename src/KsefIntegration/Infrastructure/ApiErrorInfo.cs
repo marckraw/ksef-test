@@ -21,8 +21,10 @@ namespace KsefIntegration.Infrastructure
                 return new ApiErrorInfo
                 {
                     Code = json["exceptionCode"]?.ToString()
+                        ?? json["exception"]?["exceptionDetailList"]?[0]?["exceptionCode"]?.ToString()
                         ?? json["code"]?.ToString(),
                     Description = json["exceptionDescription"]?.ToString()
+                        ?? json["exception"]?["exceptionDetailList"]?[0]?["exceptionDescription"]?.ToString()
                         ?? json["message"]?.ToString()
                         ?? json["title"]?.ToString(),
                 };

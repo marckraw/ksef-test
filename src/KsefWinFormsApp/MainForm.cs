@@ -338,7 +338,7 @@ namespace KsefWinFormsApp
                 BaseUrl = _settings.BaseUrl.Trim(),
                 Nip = _settings.Nip.Trim(),
                 KsefToken = _settings.KsefToken.Trim(),
-                SubjectIdentifierType = "onip",
+                SubjectIdentifierType = "Nip",
                 RequestTimeoutSeconds = 60,
                 AuthStatusPollDelayMs = 1000,
                 AuthStatusMaxAttempts = 30,

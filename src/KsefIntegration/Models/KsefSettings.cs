@@ -8,7 +8,7 @@ namespace KsefIntegration.Models
 
         public string Nip { get; set; } = string.Empty;
 
-        public string SubjectIdentifierType { get; set; } = "onip";
+        public string SubjectIdentifierType { get; set; } = "Nip";
 
         public int RequestTimeoutSeconds { get; set; } = 60;
 

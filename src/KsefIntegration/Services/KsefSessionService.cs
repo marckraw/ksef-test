@@ -10,6 +10,7 @@ using KsefIntegration.Infrastructure;
 using KsefIntegration.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Encodings;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Parameters;
@@ -106,16 +107,15 @@ namespace KsefIntegration.Services
 
         private async Task RefreshAccessTokenAsync(CancellationToken cancellationToken)
         {
-            var payload = new JObject
+            var headers = new Dictionary<string, string>
             {
-                ["refreshToken"] = _tokens!.RefreshToken,
-                ["grantType"] = "refresh_token",
+                ["Authorization"] = "Bearer " + _tokens!.RefreshToken,
             };
 
-            var refreshResponse = await PostJsonAsync("/auth/token/refresh", payload, null, cancellationToken)
+            var refreshResponse = await PostJsonAsync("/auth/token/refresh", new JObject(), headers, cancellationToken)
                 .ConfigureAwait(false);
 
-            _tokens = ParseSessionTokens(refreshResponse);
+            _tokens = ParseRefreshedSessionTokens(refreshResponse);
         }
 
         private async Task AuthenticateWithKsefTokenAsync(CancellationToken cancellationToken)
@@ -129,16 +129,11 @@ namespace KsefIntegration.Services
                 .ConfigureAwait(false);
 
             var challenge = GetRequiredString(challengeResponse, "challenge");
-            var challengeTimestamp = challengeResponse["timestamp"]?.ToString()
-                ?? challengeResponse["timestampMs"]?.ToString();
-            if (string.IsNullOrWhiteSpace(challengeTimestamp))
-            {
-                throw new InvalidOperationException("Missing required property 'timestamp' or 'timestampMs' in KSeF response.");
-            }
+            var challengeTimestampMs = ResolveChallengeTimestampMs(challengeResponse);
 
             var publicKey = await GetTokenEncryptionPublicMaterialAsync(cancellationToken).ConfigureAwait(false);
 
-            var encryptedToken = EncryptKsefToken(_settings.KsefToken, challengeTimestamp, publicKey);
+            var encryptedToken = EncryptKsefToken(_settings.KsefToken, challengeTimestampMs, publicKey);
 
             var initPayload = new JObject
             {
@@ -151,26 +146,44 @@ namespace KsefIntegration.Services
                 .ConfigureAwait(false);
 
             var referenceNumber = GetRequiredString(initResponse, "referenceNumber");
+            var authenticationToken = GetRequiredString((JObject?)initResponse["authenticationToken"], "token");
 
-            await WaitForAuthCompletionAsync(referenceNumber, cancellationToken).ConfigureAwait(false);
+            await WaitForAuthCompletionAsync(referenceNumber, authenticationToken, cancellationToken).ConfigureAwait(false);
 
             var redeemHeaders = new Dictionary<string, string>
             {
-                ["Reference-Number"] = referenceNumber,
+                ["Authorization"] = "Bearer " + authenticationToken,
             };
-
             var redeemResponse = await PostJsonAsync("/auth/token/redeem", new JObject(), redeemHeaders, cancellationToken)
                 .ConfigureAwait(false);
 
             _tokens = ParseSessionTokens(redeemResponse);
         }
 
-        private async Task WaitForAuthCompletionAsync(string referenceNumber, CancellationToken cancellationToken)
+        private async Task WaitForAuthCompletionAsync(string referenceNumber, string authenticationToken, CancellationToken cancellationToken)
         {
+            var headers = new Dictionary<string, string>
+            {
+                ["Authorization"] = "Bearer " + authenticationToken,
+            };
+
             for (var attempt = 1; attempt <= _settings.AuthStatusMaxAttempts; attempt++)
             {
-                var statusResponse = await GetJsonAsync($"/auth/{Uri.EscapeDataString(referenceNumber)}", null, cancellationToken)
+                var statusResponse = await GetJsonAsync($"/auth/{Uri.EscapeDataString(referenceNumber)}", headers, cancellationToken)
                     .ConfigureAwait(false);
+
+                var statusCode = statusResponse["status"]?["code"]?.Value<int?>();
+                if (statusCode == 200)
+                {
+                    return;
+                }
+
+                if (statusCode.HasValue && statusCode.Value >= 400)
+                {
+                    var reason = statusResponse["status"]?["description"]?.ToString()
+                        ?? statusResponse["details"]?[0]?["description"]?.ToString();
+                    throw new InvalidOperationException($"KSeF authentication failed. {reason}".Trim());
+                }
 
                 var status = statusResponse["status"]?.ToString();
                 if (string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
@@ -297,9 +310,9 @@ namespace KsefIntegration.Services
         private KsefSessionTokens ParseSessionTokens(JObject response)
         {
             var accessToken = GetRequiredString((JObject?)response["accessToken"], "token");
-            var accessExpiration = GetRequiredString((JObject?)response["accessToken"], "expirationDate");
+            var accessExpiration = GetRequiredTokenExpiration((JObject?)response["accessToken"]);
             var refreshToken = GetRequiredString((JObject?)response["refreshToken"], "token");
-            var refreshExpiration = GetRequiredString((JObject?)response["refreshToken"], "expirationDate");
+            var refreshExpiration = GetRequiredTokenExpiration((JObject?)response["refreshToken"]);
 
             return new KsefSessionTokens
             {
@@ -308,6 +321,43 @@ namespace KsefIntegration.Services
                 RefreshToken = refreshToken,
                 RefreshTokenExpirationDate = ParseDate(refreshExpiration),
             };
+        }
+
+        private KsefSessionTokens ParseRefreshedSessionTokens(JObject response)
+        {
+            var accessToken = GetRequiredString((JObject?)response["accessToken"], "token");
+            var accessExpiration = GetRequiredTokenExpiration((JObject?)response["accessToken"]);
+
+            var existingRefreshToken = _tokens?.RefreshToken;
+            var existingRefreshExpiration = _tokens?.RefreshTokenExpirationDate ?? DateTimeOffset.MinValue;
+
+            var refreshTokenObject = response["refreshToken"] as JObject;
+            var refreshToken = refreshTokenObject != null
+                ? GetRequiredString(refreshTokenObject, "token")
+                : existingRefreshToken ?? string.Empty;
+            var refreshExpiration = refreshTokenObject != null
+                ? ParseDate(GetRequiredTokenExpiration(refreshTokenObject))
+                : existingRefreshExpiration;
+
+            return new KsefSessionTokens
+            {
+                AccessToken = accessToken,
+                AccessTokenExpirationDate = ParseDate(accessExpiration),
+                RefreshToken = refreshToken,
+                RefreshTokenExpirationDate = refreshExpiration,
+            };
+        }
+
+        private static string GetRequiredTokenExpiration(JObject? tokenObject)
+        {
+            var value = tokenObject?["expirationDate"]?.ToString()
+                ?? tokenObject?["validUntil"]?.ToString();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException("Missing required token expiration in KSeF response.");
+            }
+
+            return value;
         }
 
         private static DateTimeOffset ParseDate(string value)
@@ -322,11 +372,48 @@ namespace KsefIntegration.Services
 
         private JObject CreateContextIdentifier()
         {
+            var type = NormalizeContextIdentifierType(_settings.SubjectIdentifierType);
             return new JObject
             {
-                ["type"] = _settings.SubjectIdentifierType,
-                ["identifier"] = _settings.Nip,
+                ["type"] = type,
+                ["value"] = _settings.Nip,
             };
+        }
+
+        private static string NormalizeContextIdentifierType(string type)
+        {
+            if (string.IsNullOrWhiteSpace(type))
+            {
+                return "Nip";
+            }
+
+            var normalized = type.Trim();
+            if (string.Equals(normalized, "onip", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalized, "nip", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Nip";
+            }
+
+            if (string.Equals(normalized, "internalid", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalized, "internal-id", StringComparison.OrdinalIgnoreCase))
+            {
+                return "InternalId";
+            }
+
+            if (string.Equals(normalized, "nipvatue", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalized, "vatue", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalized, "vat-ue", StringComparison.OrdinalIgnoreCase))
+            {
+                return "NipVatUe";
+            }
+
+            if (string.Equals(normalized, "peppolid", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalized, "peppol-id", StringComparison.OrdinalIgnoreCase))
+            {
+                return "PeppolId";
+            }
+
+            return normalized;
         }
 
         private async Task<JObject> GetJsonAsync(
@@ -456,14 +543,12 @@ namespace KsefIntegration.Services
         {
             var cipherText = BuildTokenCipherText(token, timestamp);
             var key = ParseRsaPublicKey(publicMaterial);
-            var engine = new Pkcs1Encoding(new RsaEngine());
+            var engine = new OaepEncoding(new RsaEngine(), new Sha256Digest(), new Sha256Digest(), null);
             engine.Init(true, key);
 
             var input = Encoding.UTF8.GetBytes(cipherText);
             var encrypted = engine.ProcessBlock(input, 0, input.Length);
-            var encoded = Convert.ToBase64String(encrypted);
-
-            return SplitIntoLines(encoded, 64);
+            return Convert.ToBase64String(encrypted);
         }
 
         private static RsaKeyParameters ParseRsaPublicKey(string publicMaterial)
@@ -515,37 +600,26 @@ namespace KsefIntegration.Services
 
         private static string BuildTokenCipherText(string token, string timestamp)
         {
-            if (DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
-            {
-                return string.Format(
-                    CultureInfo.InvariantCulture,
-                    "{0}|{1}",
-                    token,
-                    parsed.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture));
-            }
-
             return string.Format(CultureInfo.InvariantCulture, "{0}|{1}", token, timestamp);
         }
 
-        private static string SplitIntoLines(string value, int lineLength)
+        private static string ResolveChallengeTimestampMs(JObject challengeResponse)
         {
-            if (lineLength <= 0 || value.Length <= lineLength)
+            var timestampMs = challengeResponse["timestampMs"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(timestampMs))
             {
-                return value;
+                return timestampMs;
             }
 
-            var builder = new StringBuilder(value.Length + (value.Length / lineLength));
-            for (var i = 0; i < value.Length; i += lineLength)
+            var timestamp = challengeResponse["timestamp"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(timestamp)
+                && DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
             {
-                var chunkLength = Math.Min(lineLength, value.Length - i);
-                builder.Append(value, i, chunkLength);
-                if (i + chunkLength < value.Length)
-                {
-                    builder.Append('\n');
-                }
+                return parsed.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
             }
 
-            return builder.ToString();
+            throw new InvalidOperationException("Missing required property 'timestampMs' in KSeF response.");
         }
+
     }
 }
