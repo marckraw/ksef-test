@@ -12,7 +12,9 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Org.BouncyCastle.Crypto.Encodings;
 using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
+using Org.BouncyCastle.X509;
 
 namespace KsefIntegration.Services
 {
@@ -127,11 +129,14 @@ namespace KsefIntegration.Services
                 .ConfigureAwait(false);
 
             var challenge = GetRequiredString(challengeResponse, "challenge");
-            var challengeTimestamp = GetRequiredString(challengeResponse, "timestamp");
+            var challengeTimestamp = challengeResponse["timestamp"]?.ToString()
+                ?? challengeResponse["timestampMs"]?.ToString();
+            if (string.IsNullOrWhiteSpace(challengeTimestamp))
+            {
+                throw new InvalidOperationException("Missing required property 'timestamp' or 'timestampMs' in KSeF response.");
+            }
 
-            var publicKeyResponse = await GetJsonAsync("/certificates/public-key", null, cancellationToken)
-                .ConfigureAwait(false);
-            var publicKey = GetRequiredString(publicKeyResponse, "value");
+            var publicKey = await GetTokenEncryptionPublicMaterialAsync(cancellationToken).ConfigureAwait(false);
 
             var encryptedToken = EncryptKsefToken(_settings.KsefToken, challengeTimestamp, publicKey);
 
@@ -190,6 +195,105 @@ namespace KsefIntegration.Services
             throw new TimeoutException("Timed out while waiting for KSeF authentication status.");
         }
 
+        private async Task<string> GetTokenEncryptionPublicMaterialAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var payload = await GetAnyJsonAsync("/security/public-key-certificates", null, cancellationToken)
+                    .ConfigureAwait(false);
+                var material = TryExtractPublicMaterialFromSecurityPayload(payload);
+                if (!string.IsNullOrWhiteSpace(material))
+                {
+                    return material;
+                }
+            }
+            catch (KsefApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                // Fallback to older endpoint.
+            }
+
+            var publicKeyResponse = await GetJsonAsync("/certificates/public-key", null, cancellationToken)
+                .ConfigureAwait(false);
+            return GetRequiredString(publicKeyResponse, "value");
+        }
+
+        private static string? TryExtractPublicMaterialFromSecurityPayload(JToken payload)
+        {
+            if (payload == null)
+            {
+                return null;
+            }
+
+            if (payload.Type == JTokenType.Object)
+            {
+                var obj = (JObject)payload;
+                var direct = obj["certificate"]?.ToString()
+                    ?? obj["publicKey"]?.ToString()
+                    ?? obj["value"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(direct))
+                {
+                    return direct;
+                }
+            }
+
+            JArray? certificates = null;
+
+            if (payload.Type == JTokenType.Array)
+            {
+                certificates = (JArray)payload;
+            }
+            else
+            {
+                certificates = payload["certificates"] as JArray
+                    ?? payload["items"] as JArray
+                    ?? payload["data"] as JArray;
+            }
+
+            if (certificates == null || certificates.Count == 0)
+            {
+                return null;
+            }
+
+            foreach (var certificate in certificates)
+            {
+                var usageToken = certificate["usage"];
+                if (usageToken != null)
+                {
+                    if (usageToken.Type == JTokenType.Array)
+                    {
+                        foreach (var usage in usageToken)
+                        {
+                            if (usage != null && usage.ToString().IndexOf("KsefTokenEncryption", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                var matched = certificate["certificate"]?.ToString()
+                                    ?? certificate["publicKey"]?.ToString()
+                                    ?? certificate["value"]?.ToString();
+                                if (!string.IsNullOrWhiteSpace(matched))
+                                {
+                                    return matched;
+                                }
+                            }
+                        }
+                    }
+                    else if (usageToken.ToString().IndexOf("KsefTokenEncryption", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        var matched = certificate["certificate"]?.ToString()
+                            ?? certificate["publicKey"]?.ToString()
+                            ?? certificate["value"]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(matched))
+                        {
+                            return matched;
+                        }
+                    }
+                }
+            }
+
+            var first = certificates.First;
+            return first?["certificate"]?.ToString()
+                ?? first?["publicKey"]?.ToString()
+                ?? first?["value"]?.ToString();
+        }
+
         private KsefSessionTokens ParseSessionTokens(JObject response)
         {
             var accessToken = GetRequiredString((JObject?)response["accessToken"], "token");
@@ -237,6 +341,18 @@ namespace KsefIntegration.Services
             }
         }
 
+        private async Task<JToken> GetAnyJsonAsync(
+            string relativePath,
+            IDictionary<string, string>? headers,
+            CancellationToken cancellationToken)
+        {
+            using (var request = new HttpRequestMessage(HttpMethod.Get, BuildUrl(relativePath)))
+            {
+                ApplyHeaders(request, headers);
+                return await SendAndParseAnyAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         private async Task<JObject> PostJsonAsync(
             string relativePath,
             JObject payload,
@@ -273,6 +389,27 @@ namespace KsefIntegration.Services
                 }
 
                 return JObject.Parse(responseBody);
+            }
+        }
+
+        private async Task<JToken> SendAndParseAnyAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
+            {
+                var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var apiError = ApiErrorInfo.Parse(responseBody);
+                    var message = $"KSeF call failed: {(int)response.StatusCode} {response.StatusCode}. {apiError.Description}".Trim();
+                    throw new KsefApiException(message, response.StatusCode, apiError.Code, responseBody);
+                }
+
+                if (string.IsNullOrWhiteSpace(responseBody))
+                {
+                    return new JObject();
+                }
+
+                return JToken.Parse(responseBody);
             }
         }
 
@@ -315,12 +452,10 @@ namespace KsefIntegration.Services
             return value;
         }
 
-        private static string EncryptKsefToken(string token, string timestamp, string publicKey)
+        private static string EncryptKsefToken(string token, string timestamp, string publicMaterial)
         {
             var cipherText = BuildTokenCipherText(token, timestamp);
-            var keyBytes = Convert.FromBase64String(publicKey);
-
-            var key = PublicKeyFactory.CreateKey(keyBytes);
+            var key = ParseRsaPublicKey(publicMaterial);
             var engine = new Pkcs1Encoding(new RsaEngine());
             engine.Init(true, key);
 
@@ -329,6 +464,53 @@ namespace KsefIntegration.Services
             var encoded = Convert.ToBase64String(encrypted);
 
             return SplitIntoLines(encoded, 64);
+        }
+
+        private static RsaKeyParameters ParseRsaPublicKey(string publicMaterial)
+        {
+            var bytes = ParseBase64OrPem(publicMaterial);
+
+            try
+            {
+                var cert = new X509CertificateParser().ReadCertificate(bytes);
+                return (RsaKeyParameters)cert.GetPublicKey();
+            }
+            catch
+            {
+                var key = PublicKeyFactory.CreateKey(bytes);
+                return (RsaKeyParameters)key;
+            }
+        }
+
+        private static byte[] ParseBase64OrPem(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException("Missing public key/certificate material.");
+            }
+
+            var trimmed = value.Trim();
+            if (trimmed.Contains("-----BEGIN", StringComparison.OrdinalIgnoreCase))
+            {
+                var lines = trimmed.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                var builder = new StringBuilder();
+                foreach (var line in lines)
+                {
+                    if (!line.StartsWith("-----", StringComparison.Ordinal))
+                    {
+                        builder.Append(line.Trim());
+                    }
+                }
+
+                return Convert.FromBase64String(builder.ToString());
+            }
+
+            var compact = trimmed
+                .Replace("\r", string.Empty)
+                .Replace("\n", string.Empty)
+                .Replace(" ", string.Empty);
+
+            return Convert.FromBase64String(compact);
         }
 
         private static string BuildTokenCipherText(string token, string timestamp)
