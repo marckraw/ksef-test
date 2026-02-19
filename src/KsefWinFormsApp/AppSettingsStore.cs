@@ -1,16 +1,11 @@
 using System;
 using System.IO;
-using System.Text.Json;
+using Newtonsoft.Json;
 
 namespace KsefWinFormsApp
 {
     public static class AppSettingsStore
     {
-        private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-        };
-
         private static readonly string SettingsPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "KsefWinFormsApp",
@@ -31,7 +26,7 @@ namespace KsefWinFormsApp
                     return new AppSettings();
                 }
 
-                var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions);
+                var settings = JsonConvert.DeserializeObject<AppSettings>(json);
                 return settings ?? new AppSettings();
             }
             catch
@@ -53,7 +48,7 @@ namespace KsefWinFormsApp
                 Directory.CreateDirectory(directory);
             }
 
-            var json = JsonSerializer.Serialize(settings, JsonOptions);
+            var json = JsonConvert.SerializeObject(settings, Formatting.Indented);
             File.WriteAllText(SettingsPath, json);
         }
     }
