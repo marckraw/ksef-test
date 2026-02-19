@@ -23,59 +23,61 @@ npm ci
 npm run build
 ```
 
-Po buildzie skrypt CLI będzie zwykle dostępny jako:
+## 3. Ważne: moduł != CLI
 
-- `...\ksef-pdf-generator\dist\index.js`
+Pliki z `dist` (np. `dist/ksef-fe-invoice-converter.mjs`, `dist/index.js`) to moduły biblioteki.
+Uruchomienie ich bezpośrednio (`node dist/...`) zwykle nie wygeneruje PDF, mimo kodu wyjścia `0`.
 
-## 3. Argumenty CLI (ważne)
+Dlatego trzeba użyć **wrappera CLI**.
 
-Generator działa na argumentach pozycyjnych:
+## 4. Wrapper CLI
+
+1. Skopiuj plik `docs/ksef-pdf-cli-wrapper.mjs` z tego repo do katalogu generatora, np.:
+
+`C:\tools\ksef-pdf-generator\ksef-pdf-cli-wrapper.mjs`
+
+2. Wrapper importuje moduł:
+
+`./dist/ksef-fe-invoice-converter.mjs`
+
+czyli musi leżeć obok folderu `dist` generatora.
+
+3. Test ręczny (CMD/PowerShell):
 
 ```bash
-node <script> <documentType> <inputXmlPath> <outputPdfPath> [optionalAdditionalDataJson]
+node C:\tools\ksef-pdf-generator\ksef-pdf-cli-wrapper.mjs faktura C:\tmp\invoice.xml C:\tmp\invoice.pdf "{\"nrKSeF\":\"ABC-123\"}"
 ```
 
-W praktyce dla faktury:
+Jeśli PDF się utworzy, konfiguracja jest poprawna.
 
-- `documentType`: `faktura`
-- `inputXmlPath`: ścieżka do XML
-- `outputPdfPath`: ścieżka docelowego PDF
-- `optionalAdditionalDataJson`: opcjonalny JSON (np. `nrKSeF`)
-
-Przykład:
-
-```bash
-node dist/index.js faktura C:\tmp\invoice.xml C:\tmp\invoice.pdf "{\"nrKSeF\":\"ABC-123\"}"
-```
-
-## 4. Co wpisać w naszej aplikacji (Ustawienia...)
+## 5. Co wpisać w naszej aplikacji (Ustawienia...)
 
 W `Ustawienia...` wpisz:
 
 1. `Polecenie PDF (np. node)`: `node`
 2. `Ścieżka wrappera PDF (.mjs/.js)`: pełna ścieżka do skryptu, np.
-   `C:\tools\ksef-pdf-generator\dist\index.js`
+   `C:\tools\ksef-pdf-generator\ksef-pdf-cli-wrapper.mjs`
 3. `Szablon argumentów`:
 
 ```text
 {script} faktura {input} {output} {extra}
 ```
 
-## 5. Jak działa `{extra}` w tym projekcie
+## 6. Jak działa `{extra}` w tym projekcie
 
 Main form automatycznie przekazuje `nrKSeF` jako JSON do `{extra}`.
 Czyli nie trzeba wpisywać ręcznie JSON per faktura.
 
-## 6. Najczęstsze problemy
+## 7. Najczęstsze problemy
 
 1. `node` nie znaleziony:
    - dodaj Node do `PATH` lub wpisz pełną ścieżkę do `node.exe`.
 2. Błędna ścieżka skryptu:
-   - wskaż realny plik `.js`/`.mjs` po buildzie.
+   - wskaż wrapper CLI, nie moduł `dist/ksef-fe-invoice-converter.mjs`.
 3. Błędne argumenty:
    - sprawdź, czy template jest pozycyjny, nie flagowy (`--input`, `--output`).
 
-## 7. Źródła oficjalne
+## 8. Źródła oficjalne
 
 - https://github.com/CIRFMF/ksef-pdf-generator
 - https://github.com/CIRFMF/ksef-client-csharp

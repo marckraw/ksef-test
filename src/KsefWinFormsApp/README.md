@@ -45,7 +45,7 @@ Podczas pobierania obserwuj log na dole:
 ## Generator PDF MF - co wpisać
 
 1. `Polecenie PDF`: `node`
-2. `Ścieżka wrappera PDF`: np. `C:\tools\ksef-pdf-generator\dist\index.js`
+2. `Ścieżka wrappera PDF`: np. `C:\tools\ksef-pdf-generator\ksef-pdf-cli-wrapper.mjs`
 3. `Szablon argumentów`:
 
 ```text
@@ -55,3 +55,5 @@ Podczas pobierania obserwuj log na dole:
 Szczegółowa instrukcja instalacji generatora:
 
 - `docs/PDF_GENERATOR_SETUP_PL.md`
+
+Uwaga: nie wskazuj bezpośrednio `dist/ksef-fe-invoice-converter.mjs` ani `dist/index.js`, bo to moduły biblioteki, nie wrapper CLI.

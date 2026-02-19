@@ -61,7 +61,7 @@ public partial class MainForm : Form
         var pdfSettings = new PdfGeneratorSettings
         {
             CommandPath = "node",
-            ScriptPath = @"C:\tools\ksef-pdf-generator\dist\index.js",
+            ScriptPath = @"C:\tools\ksef-pdf-generator\ksef-pdf-cli-wrapper.mjs",
             ArgumentsTemplate = "{script} faktura {input} {output} {extra}",
             TimeoutSeconds = 60,
         };

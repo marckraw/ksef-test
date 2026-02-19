@@ -189,6 +189,7 @@ namespace KsefIntegration.Services
 
             if (!File.Exists(outputPdfPath))
             {
+                var missingOutputHint = BuildMissingOutputHint(_settings.ScriptPath);
                 throw new FileNotFoundException(
                     "PDF generator finished successfully but output file was not created. "
                     + "Command: "
@@ -198,7 +199,8 @@ namespace KsefIntegration.Services
                     + ". stderr: "
                     + Truncate(lastStderr, 1500)
                     + ". stdout: "
-                    + Truncate(lastStdout, 1500),
+                    + Truncate(lastStdout, 1500)
+                    + missingOutputHint,
                     outputPdfPath);
             }
 
@@ -337,6 +339,24 @@ namespace KsefIntegration.Services
             }
 
             return value.Substring(0, maxLength) + "...";
+        }
+
+        private static string BuildMissingOutputHint(string scriptPath)
+        {
+            if (string.IsNullOrWhiteSpace(scriptPath))
+            {
+                return string.Empty;
+            }
+
+            var fileName = Path.GetFileName(scriptPath);
+            if (fileName.Equals("ksef-fe-invoice-converter.mjs", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("index.js", StringComparison.OrdinalIgnoreCase))
+            {
+                return " Hint: wskazany plik wygląda na moduł biblioteki, a nie wrapper CLI. "
+                    + "Użyj dedykowanego skryptu wrappera (szczegóły: docs/PDF_GENERATOR_SETUP_PL.md).";
+            }
+
+            return string.Empty;
         }
     }
 }

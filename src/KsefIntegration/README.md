@@ -28,7 +28,7 @@ var ksefSettings = new KsefSettings
 var pdfSettings = new PdfGeneratorSettings
 {
     CommandPath = "node",
-    ScriptPath = @"C:\tools\ksef-pdf-generator\dist\index.js",
+    ScriptPath = @"C:\tools\ksef-pdf-generator\ksef-pdf-cli-wrapper.mjs",
     ArgumentsTemplate = "{script} faktura {input} {output} {extra}",
 };
 
@@ -52,5 +52,6 @@ var outputPath = await facade.DownloadInvoiceVisualizationAsync(
   - `{includeKsefMetadata}`
   - `{extra}`
 - For MF generator use positional args, e.g. `{script} faktura {input} {output} {extra}`.
+- Do not point directly to `dist/ksef-fe-invoice-converter.mjs`/`dist/index.js`; use a CLI wrapper script.
 - Ensure local Node runtime and official MF PDF generator are installed on workstation.
 - Recommended installation/arguments guide: `docs/PDF_GENERATOR_SETUP_PL.md`.
