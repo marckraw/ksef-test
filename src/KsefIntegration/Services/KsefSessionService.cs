@@ -575,7 +575,7 @@ namespace KsefIntegration.Services
             }
 
             var trimmed = value.Trim();
-            if (trimmed.Contains("-----BEGIN", StringComparison.OrdinalIgnoreCase))
+            if (trimmed.Contains("-----BEGIN"))
             {
                 var lines = trimmed.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
                 var builder = new StringBuilder();

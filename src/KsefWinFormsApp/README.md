@@ -17,6 +17,8 @@ Minimalny projekt WinForms (.NET Framework 4.8, VS2019/VS2022) do pobrania faktu
    - `Polecenie PDF` (np. `node`)
    - `Ścieżka wrappera PDF (.mjs/.js)`
    - `Szablon argumentów`
+   - `Zapisuj pobrane XML faktur`
+   - `Folder zapisu XML`
    - opcje `Dołącz kod QR` i `Dołącz metadane KSeF`
 
 ## Trwałość ustawień
@@ -38,6 +40,7 @@ Podczas pobierania obserwuj log na dole:
 
 - wpisy aplikacyjne (walidacja, start/koniec, wyjątki)
 - wpisy HTTP (`HTTP ->` i `HTTP <-`) dla auth/sesji/pobierania faktury
+- jeśli włączysz zapis XML, XML jest zapisywany po kroku pobrania i przed generacją PDF
 
 ## Generator PDF MF - co wpisać
 

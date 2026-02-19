@@ -12,6 +12,7 @@ To repozytorium zawiera kompletną solucję WinForms (target: .NET Framework 4.8
 3. Ustaw `KsefWinFormsApp` jako Startup Project.
 4. W aplikacji kliknij `Ustawienia...` i wpisz dane KSeF oraz generatora PDF.
 5. Wróć do ekranu głównego, podaj numer KSeF i pobierz PDF.
+6. Opcjonalnie w `Ustawienia...` włącz zapis XML i wskaż folder, aby zachować pobrany XML przed generacją PDF.
 
 ## Dokumentacja
 

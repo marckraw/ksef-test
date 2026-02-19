@@ -20,6 +20,10 @@ namespace KsefWinFormsApp
 
         public bool IncludeKsefMetadata { get; set; } = true;
 
+        public bool SaveInvoiceXml { get; set; } = false;
+
+        public string XmlOutputDirectory { get; set; } = string.Empty;
+
         public string DefaultOutputPdfPath { get; set; } = string.Empty;
 
         public AppSettings Clone()
@@ -34,6 +38,8 @@ namespace KsefWinFormsApp
                 PdfArgumentsTemplate = PdfArgumentsTemplate,
                 IncludeQrCode = IncludeQrCode,
                 IncludeKsefMetadata = IncludeKsefMetadata,
+                SaveInvoiceXml = SaveInvoiceXml,
+                XmlOutputDirectory = XmlOutputDirectory,
                 DefaultOutputPdfPath = DefaultOutputPdfPath,
             };
         }

@@ -2,9 +2,9 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-using KsefIntegration.Abstractions;
 using KsefIntegration.Infrastructure;
 using KsefIntegration.Models;
 using KsefIntegration.Services;
@@ -45,6 +45,11 @@ namespace KsefWinFormsApp
             if (string.IsNullOrWhiteSpace(_settings.DefaultOutputPdfPath))
             {
                 _settings.DefaultOutputPdfPath = GetDefaultOutputPath();
+            }
+
+            if (_settings.SaveInvoiceXml && string.IsNullOrWhiteSpace(_settings.XmlOutputDirectory))
+            {
+                _settings.XmlOutputDirectory = GetDefaultXmlDirectory();
             }
 
             ApplySettingsToUi();
@@ -195,13 +200,29 @@ namespace KsefWinFormsApp
                 AppendLog("NIP: " + _settings.Nip);
                 AppendLog("Token KSeF: " + (string.IsNullOrWhiteSpace(_settings.KsefToken) ? "brak" : "ustawiony"));
 
-                AppendLog("Tworzenie fasady KSeF...");
-                var facade = BuildFacade();
+                var ksefSettings = BuildKsefSettings();
+                var pdfSettings = BuildPdfSettings();
 
-                AppendLog("Wywołanie: DownloadInvoiceVisualizationAsync");
-                var resultPath = await facade.DownloadInvoiceVisualizationAsync(
-                    ksefNumber,
+                AppendLog("Tworzenie serwisów KSeF...");
+                var sessionService = new KsefSessionService(_httpClient, ksefSettings);
+                var invoiceService = new KsefInvoiceService(_httpClient, ksefSettings, sessionService);
+                var pdfService = new KsefPdfVisualizationService(pdfSettings);
+
+                AppendLog("Krok 1/2: Pobieranie XML z KSeF...");
+                var invoiceXml = await invoiceService.GetInvoiceXmlAsync(ksefNumber, CancellationToken.None);
+                AppendLog("Krok 1/2 OK: XML pobrany (" + invoiceXml.Length + " znaków).");
+
+                var savedXmlPath = SaveInvoiceXmlIfConfigured(ksefNumber, invoiceXml);
+                if (!string.IsNullOrWhiteSpace(savedXmlPath))
+                {
+                    AppendLog("XML zapisany: " + savedXmlPath);
+                }
+
+                AppendLog("Krok 2/2: Generowanie PDF...");
+                var resultPath = await pdfService.GeneratePdfAsync(
+                    invoiceXml,
                     outputPath,
+                    ksefNumber,
                     new PdfRenderOptions
                     {
                         IncludeQrCode = _settings.IncludeQrCode,
@@ -263,6 +284,11 @@ namespace KsefWinFormsApp
                 _settings.DefaultOutputPdfPath = GetDefaultOutputPath();
             }
 
+            if (_settings.SaveInvoiceXml && string.IsNullOrWhiteSpace(_settings.XmlOutputDirectory))
+            {
+                _settings.XmlOutputDirectory = GetDefaultXmlDirectory();
+            }
+
             AppSettingsStore.Save(_settings);
             _txtOutputPdfPath.Text = _settings.DefaultOutputPdfPath;
             _lblConfigSummary.Text = BuildConfigSummary(_settings);
@@ -307,6 +333,13 @@ namespace KsefWinFormsApp
                 return false;
             }
 
+            if (_settings.SaveInvoiceXml && string.IsNullOrWhiteSpace(_settings.XmlOutputDirectory))
+            {
+                AppendLog("Walidacja: włączono zapis XML, ale brak folderu XML.");
+                MessageBox.Show(this, "Uzupełnij folder zapisu XML w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
             if (string.IsNullOrWhiteSpace(_settings.PdfCommandPath))
             {
                 AppendLog("Walidacja: brak polecenia PDF (np. node).");
@@ -331,9 +364,9 @@ namespace KsefWinFormsApp
             return true;
         }
 
-        private IKsefFacade BuildFacade()
+        private KsefSettings BuildKsefSettings()
         {
-            var ksefSettings = new KsefSettings
+            return new KsefSettings
             {
                 BaseUrl = _settings.BaseUrl.Trim(),
                 Nip = _settings.Nip.Trim(),
@@ -345,16 +378,40 @@ namespace KsefWinFormsApp
                 InvoiceRetryCount = 4,
                 InvoiceRetryDelayMs = 1000,
             };
+        }
 
-            var pdfSettings = new PdfGeneratorSettings
+        private PdfGeneratorSettings BuildPdfSettings()
+        {
+            return new PdfGeneratorSettings
             {
                 CommandPath = _settings.PdfCommandPath.Trim(),
                 ScriptPath = _settings.PdfScriptPath.Trim(),
                 ArgumentsTemplate = _settings.PdfArgumentsTemplate.Trim(),
                 TimeoutSeconds = 60,
             };
+        }
 
-            return KsefFacadeFactory.Create(ksefSettings, pdfSettings, _httpClient);
+        private string? SaveInvoiceXmlIfConfigured(string ksefNumber, string invoiceXml)
+        {
+            if (!_settings.SaveInvoiceXml)
+            {
+                return null;
+            }
+
+            var directory = _settings.XmlOutputDirectory.Trim();
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return null;
+            }
+
+            Directory.CreateDirectory(directory);
+
+            var safeKsefNumber = MakeSafeFileName(ksefNumber);
+            var fileName = safeKsefNumber + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".xml";
+            var fullPath = Path.Combine(directory, fileName);
+
+            File.WriteAllText(fullPath, invoiceXml, Encoding.UTF8);
+            return fullPath;
         }
 
         private void ToggleBusy(bool busy)
@@ -429,8 +486,11 @@ namespace KsefWinFormsApp
             var nipPart = string.IsNullOrWhiteSpace(settings.Nip) ? "NIP: brak" : "NIP: " + settings.Nip;
             var tokenPart = string.IsNullOrWhiteSpace(settings.KsefToken) ? "token: brak" : "token: ustawiony";
             var scriptPart = string.IsNullOrWhiteSpace(settings.PdfScriptPath) ? "PDF CLI: brak" : "PDF CLI: ustawiony";
+            var xmlPart = settings.SaveInvoiceXml
+                ? (string.IsNullOrWhiteSpace(settings.XmlOutputDirectory) ? "XML: folder brak" : "XML: zapis ON")
+                : "XML: zapis OFF";
 
-            return "Konfiguracja -> " + nipPart + ", " + tokenPart + ", " + scriptPart;
+            return "Konfiguracja -> " + nipPart + ", " + tokenPart + ", " + scriptPart + ", " + xmlPart;
         }
 
         private static string BuildAdditionalDataArgument(string ksefNumber)
@@ -448,10 +508,44 @@ namespace KsefWinFormsApp
             return "\"" + json.Replace("\"", "\\\"") + "\"";
         }
 
+        private static string MakeSafeFileName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "invoice";
+            }
+
+            var invalidChars = Path.GetInvalidFileNameChars();
+            var builder = new StringBuilder(value.Length);
+            foreach (var character in value)
+            {
+                var isInvalid = false;
+                foreach (var invalid in invalidChars)
+                {
+                    if (character == invalid)
+                    {
+                        isInvalid = true;
+                        break;
+                    }
+                }
+
+                builder.Append(isInvalid ? '_' : character);
+            }
+
+            var result = builder.ToString().Trim();
+            return string.IsNullOrWhiteSpace(result) ? "invoice" : result;
+        }
+
         private static string GetDefaultOutputPath()
         {
             var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             return Path.Combine(desktop, "ksef-invoice.pdf");
+        }
+
+        private static string GetDefaultXmlDirectory()
+        {
+            var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            return Path.Combine(documents, "KSeF", "XML");
         }
     }
 }

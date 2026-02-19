@@ -14,12 +14,15 @@ namespace KsefWinFormsApp
         private readonly TextBox _txtPdfScriptPath = new TextBox();
         private readonly TextBox _txtPdfArgumentsTemplate = new TextBox();
         private readonly TextBox _txtDefaultOutputPdfPath = new TextBox();
+        private readonly TextBox _txtXmlOutputDirectory = new TextBox();
 
+        private readonly CheckBox _chkSaveInvoiceXml = new CheckBox();
         private readonly CheckBox _chkIncludeQr = new CheckBox();
         private readonly CheckBox _chkIncludeMetadata = new CheckBox();
 
         private readonly Button _btnBrowseScript = new Button();
         private readonly Button _btnBrowseOutput = new Button();
+        private readonly Button _btnBrowseXmlFolder = new Button();
         private readonly Button _btnSave = new Button();
         private readonly Button _btnCancel = new Button();
 
@@ -34,8 +37,8 @@ namespace KsefWinFormsApp
 
             Text = "Ustawienia KSeF";
             Width = 980;
-            Height = 540;
-            MinimumSize = new Size(900, 520);
+            Height = 660;
+            MinimumSize = new Size(900, 620);
             StartPosition = FormStartPosition.CenterParent;
 
             BuildLayout();
@@ -50,7 +53,7 @@ namespace KsefWinFormsApp
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 3,
-                RowCount = 11,
+                RowCount = 13,
                 Padding = new Padding(12),
             };
 
@@ -58,7 +61,7 @@ namespace KsefWinFormsApp
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
 
-            for (var i = 0; i < 10; i++)
+            for (var i = 0; i < 12; i++)
             {
                 root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             }
@@ -72,6 +75,7 @@ namespace KsefWinFormsApp
             AddField(root, 4, "Ścieżka wrappera PDF (.mjs/.js)", _txtPdfScriptPath);
             AddField(root, 5, "Szablon argumentów", _txtPdfArgumentsTemplate);
             AddField(root, 6, "Domyślny plik wyjściowy PDF", _txtDefaultOutputPdfPath);
+            AddField(root, 7, "Folder zapisu XML", _txtXmlOutputDirectory);
 
             _btnBrowseScript.Text = "Wybierz...";
             _btnBrowseScript.Click += BrowseScriptClick;
@@ -81,13 +85,21 @@ namespace KsefWinFormsApp
             _btnBrowseOutput.Click += BrowseOutputClick;
             root.Controls.Add(_btnBrowseOutput, 2, 6);
 
+            _btnBrowseXmlFolder.Text = "Wybierz...";
+            _btnBrowseXmlFolder.Click += BrowseXmlFolderClick;
+            root.Controls.Add(_btnBrowseXmlFolder, 2, 7);
+
+            _chkSaveInvoiceXml.Text = "Zapisuj pobrane XML faktur";
+            _chkSaveInvoiceXml.Checked = false;
+            root.Controls.Add(_chkSaveInvoiceXml, 1, 8);
+
             _chkIncludeQr.Text = "Dołącz kod QR";
             _chkIncludeQr.Checked = true;
-            root.Controls.Add(_chkIncludeQr, 1, 7);
+            root.Controls.Add(_chkIncludeQr, 1, 9);
 
             _chkIncludeMetadata.Text = "Dołącz metadane KSeF";
             _chkIncludeMetadata.Checked = true;
-            root.Controls.Add(_chkIncludeMetadata, 1, 8);
+            root.Controls.Add(_chkIncludeMetadata, 1, 10);
 
             var buttons = new FlowLayoutPanel
             {
@@ -106,7 +118,7 @@ namespace KsefWinFormsApp
             buttons.Controls.Add(_btnSave);
             buttons.Controls.Add(_btnCancel);
 
-            root.Controls.Add(buttons, 1, 9);
+            root.Controls.Add(buttons, 1, 11);
 
             _txtToken.UseSystemPasswordChar = true;
 
@@ -137,6 +149,8 @@ namespace KsefWinFormsApp
             _txtPdfScriptPath.Text = Settings.PdfScriptPath;
             _txtPdfArgumentsTemplate.Text = Settings.PdfArgumentsTemplate;
             _txtDefaultOutputPdfPath.Text = Settings.DefaultOutputPdfPath;
+            _txtXmlOutputDirectory.Text = Settings.XmlOutputDirectory;
+            _chkSaveInvoiceXml.Checked = Settings.SaveInvoiceXml;
             _chkIncludeQr.Checked = Settings.IncludeQrCode;
             _chkIncludeMetadata.Checked = Settings.IncludeKsefMetadata;
         }
@@ -151,6 +165,8 @@ namespace KsefWinFormsApp
                 PdfCommandPath = _txtPdfCommandPath.Text.Trim(),
                 PdfScriptPath = _txtPdfScriptPath.Text.Trim(),
                 PdfArgumentsTemplate = _txtPdfArgumentsTemplate.Text.Trim(),
+                SaveInvoiceXml = _chkSaveInvoiceXml.Checked,
+                XmlOutputDirectory = _txtXmlOutputDirectory.Text.Trim(),
                 IncludeQrCode = _chkIncludeQr.Checked,
                 IncludeKsefMetadata = _chkIncludeMetadata.Checked,
                 DefaultOutputPdfPath = _txtDefaultOutputPdfPath.Text.Trim(),
@@ -199,6 +215,21 @@ namespace KsefWinFormsApp
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 _txtDefaultOutputPdfPath.Text = dialog.FileName;
+            }
+        }
+
+        private void BrowseXmlFolderClick(object? sender, EventArgs e)
+        {
+            using var dialog = new FolderBrowserDialog
+            {
+                Description = "Wybierz folder do zapisu pobranych XML faktur",
+                SelectedPath = _txtXmlOutputDirectory.Text.Trim(),
+                ShowNewFolderButton = true,
+            };
+
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                _txtXmlOutputDirectory.Text = dialog.SelectedPath;
             }
         }
     }
