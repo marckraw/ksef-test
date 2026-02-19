@@ -95,11 +95,6 @@ namespace KsefIntegration.Services
                 return false;
             }
 
-            if (statusCode == HttpStatusCode.TooManyRequests)
-            {
-                return true;
-            }
-
             return string.Equals(apiCode, "21165", StringComparison.OrdinalIgnoreCase);
         }
 
