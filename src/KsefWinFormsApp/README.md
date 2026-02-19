@@ -9,6 +9,7 @@ Minimalny projekt WinForms (.NET Framework 4.8, VS2019/VS2022) do pobrania faktu
    - `Wyjściowy plik PDF`
    - przycisk `Pobierz fakturę PDF`
    - przycisk `Ustawienia...`
+   - panel `Log operacji (krok po kroku)` z przyciskiem `Wyczyść log`
 2. Ekran `Ustawienia...`:
    - `KSeF Base URL`
    - `NIP`
@@ -32,6 +33,11 @@ Ustawienia zapisują się do lokalnego pliku JSON:
 4. W aplikacji kliknij `Ustawienia...` i uzupełnij dane integracyjne.
 5. Na ekranie głównym wpisz `Numer KSeF faktury` i wybierz plik wynikowy PDF.
 6. Kliknij `Pobierz fakturę PDF`.
+
+Podczas pobierania obserwuj log na dole:
+
+- wpisy aplikacyjne (walidacja, start/koniec, wyjątki)
+- wpisy HTTP (`HTTP ->` i `HTTP <-`) dla auth/sesji/pobierania faktury
 
 ## Generator PDF MF - co wpisać
 

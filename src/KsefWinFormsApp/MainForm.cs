@@ -15,10 +15,12 @@ namespace KsefWinFormsApp
     {
         private readonly TextBox _txtKsefNumber = new TextBox();
         private readonly TextBox _txtOutputPdfPath = new TextBox();
+        private readonly TextBox _txtLog = new TextBox();
 
         private readonly Button _btnBrowseOutput = new Button();
         private readonly Button _btnSettings = new Button();
         private readonly Button _btnDownloadPdf = new Button();
+        private readonly Button _btnClearLog = new Button();
 
         private readonly Label _lblConfigSummary = new Label();
         private readonly Label _lblStatus = new Label();
@@ -29,7 +31,15 @@ namespace KsefWinFormsApp
 
         public MainForm()
         {
-            _httpClient = new HttpClient();
+            Text = "KSeF Invoice Downloader (MVP)";
+            Width = 980;
+            Height = 640;
+            MinimumSize = new Size(900, 600);
+            StartPosition = FormStartPosition.CenterScreen;
+
+            BuildLayout();
+
+            _httpClient = CreateHttpClient();
             _settings = AppSettingsStore.Load();
 
             if (string.IsNullOrWhiteSpace(_settings.DefaultOutputPdfPath))
@@ -37,14 +47,8 @@ namespace KsefWinFormsApp
                 _settings.DefaultOutputPdfPath = GetDefaultOutputPath();
             }
 
-            Text = "KSeF Invoice Downloader (MVP)";
-            Width = 900;
-            Height = 420;
-            MinimumSize = new Size(840, 380);
-            StartPosition = FormStartPosition.CenterScreen;
-
-            BuildLayout();
             ApplySettingsToUi();
+            AppendLog("Aplikacja uruchomiona.");
         }
 
         protected override void Dispose(bool disposing)
@@ -63,7 +67,7 @@ namespace KsefWinFormsApp
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 3,
-                RowCount = 8,
+                RowCount = 9,
                 Padding = new Padding(12),
             };
 
@@ -76,6 +80,7 @@ namespace KsefWinFormsApp
                 root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             }
 
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             AddField(root, 0, "Numer KSeF faktury", _txtKsefNumber);
@@ -107,6 +112,29 @@ namespace KsefWinFormsApp
             _lblStatus.TextAlign = ContentAlignment.MiddleLeft;
             root.Controls.Add(_lblStatus, 1, 5);
 
+            _btnClearLog.Text = "Wyczyść log";
+            _btnClearLog.Height = 36;
+            _btnClearLog.Click += ClearLogClick;
+            root.Controls.Add(_btnClearLog, 1, 6);
+
+            var lblLog = new Label
+            {
+                Text = "Log operacji (krok po kroku)",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+            root.Controls.Add(lblLog, 0, 7);
+            root.SetColumnSpan(lblLog, 3);
+
+            _txtLog.Multiline = true;
+            _txtLog.ReadOnly = true;
+            _txtLog.ScrollBars = ScrollBars.Both;
+            _txtLog.WordWrap = false;
+            _txtLog.Dock = DockStyle.Fill;
+            _txtLog.Font = new Font("Consolas", 9f);
+            root.Controls.Add(_txtLog, 0, 8);
+            root.SetColumnSpan(_txtLog, 3);
+
             Controls.Add(root);
         }
 
@@ -123,6 +151,16 @@ namespace KsefWinFormsApp
 
             root.Controls.Add(lbl, 0, row);
             root.Controls.Add(textBox, 1, row);
+        }
+
+        private HttpClient CreateHttpClient()
+        {
+            var loggingHandler = new LoggingHttpMessageHandler(AppendLog)
+            {
+                InnerHandler = new HttpClientHandler(),
+            };
+
+            return new HttpClient(loggingHandler);
         }
 
         private void ApplySettingsToUi()
@@ -143,13 +181,24 @@ namespace KsefWinFormsApp
             }
 
             ToggleBusy(true);
+            AppendLog("========================================");
+            AppendLog("Start: Pobierz fakturę PDF");
 
             try
             {
-                var facade = BuildFacade();
                 var outputPath = _txtOutputPdfPath.Text.Trim();
                 var ksefNumber = _txtKsefNumber.Text.Trim();
 
+                AppendLog("Numer KSeF: " + ksefNumber);
+                AppendLog("Wyjściowy PDF: " + outputPath);
+                AppendLog("KSeF Base URL: " + _settings.BaseUrl);
+                AppendLog("NIP: " + _settings.Nip);
+                AppendLog("Token KSeF: " + (string.IsNullOrWhiteSpace(_settings.KsefToken) ? "brak" : "ustawiony"));
+
+                AppendLog("Tworzenie fasady KSeF...");
+                var facade = BuildFacade();
+
+                AppendLog("Wywołanie: DownloadInvoiceVisualizationAsync");
                 var resultPath = await facade.DownloadInvoiceVisualizationAsync(
                     ksefNumber,
                     outputPath,
@@ -161,6 +210,7 @@ namespace KsefWinFormsApp
                     },
                     CancellationToken.None);
 
+                AppendLog("Sukces: PDF wygenerowany -> " + resultPath);
                 _lblStatus.Text = "Sukces: " + resultPath;
                 MessageBox.Show(
                     this,
@@ -175,6 +225,12 @@ namespace KsefWinFormsApp
             catch (KsefApiException ex)
             {
                 _lblStatus.Text = "Błąd API KSeF.";
+                AppendLog("Błąd API KSeF: HTTP=" + (int)ex.StatusCode + ", API=" + (ex.ApiCode ?? "brak") + ", Msg=" + ex.Message);
+                if (!string.IsNullOrWhiteSpace(ex.ResponseBody))
+                {
+                    AppendLog("Response body: " + Truncate(ex.ResponseBody, 1000));
+                }
+
                 var details = "Kod HTTP: " + (int)ex.StatusCode + "\n"
                     + "Kod API: " + (ex.ApiCode ?? "brak") + "\n"
                     + "Opis: " + ex.Message;
@@ -183,10 +239,12 @@ namespace KsefWinFormsApp
             catch (Exception ex)
             {
                 _lblStatus.Text = "Błąd operacji.";
+                AppendLog("Błąd: " + ex.GetType().Name + ": " + ex.Message);
                 MessageBox.Show(this, ex.Message, "Błąd", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
+                AppendLog("Koniec operacji.");
                 ToggleBusy(false);
             }
         }
@@ -209,54 +267,63 @@ namespace KsefWinFormsApp
             _txtOutputPdfPath.Text = _settings.DefaultOutputPdfPath;
             _lblConfigSummary.Text = BuildConfigSummary(_settings);
             _lblStatus.Text = "Ustawienia zapisane.";
+            AppendLog("Ustawienia zapisane.");
         }
 
         private bool ValidateInputs()
         {
             if (string.IsNullOrWhiteSpace(_txtKsefNumber.Text))
             {
+                AppendLog("Walidacja: brak numeru KSeF.");
                 MessageBox.Show(this, "Wpisz numer KSeF faktury.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(_txtOutputPdfPath.Text))
             {
+                AppendLog("Walidacja: brak ścieżki wyjściowej PDF.");
                 MessageBox.Show(this, "Wskaż ścieżkę docelowego pliku PDF.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(_settings.BaseUrl))
             {
+                AppendLog("Walidacja: brak KSeF Base URL.");
                 MessageBox.Show(this, "Uzupełnij KSeF Base URL w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(_settings.Nip))
             {
+                AppendLog("Walidacja: brak NIP.");
                 MessageBox.Show(this, "Uzupełnij NIP w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(_settings.KsefToken))
             {
+                AppendLog("Walidacja: brak tokenu KSeF.");
                 MessageBox.Show(this, "Uzupełnij token KSeF w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(_settings.PdfCommandPath))
             {
+                AppendLog("Walidacja: brak polecenia PDF (np. node).");
                 MessageBox.Show(this, "Uzupełnij polecenie PDF (np. node) w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(_settings.PdfScriptPath))
             {
+                AppendLog("Walidacja: brak ścieżki skryptu PDF.");
                 MessageBox.Show(this, "Uzupełnij ścieżkę skryptu PDF (.js/.mjs) w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(_settings.PdfArgumentsTemplate))
             {
+                AppendLog("Walidacja: brak szablonu argumentów PDF.");
                 MessageBox.Show(this, "Uzupełnij szablon argumentów w ustawieniach.", "Walidacja", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
@@ -295,6 +362,7 @@ namespace KsefWinFormsApp
             _btnDownloadPdf.Enabled = !busy;
             _btnBrowseOutput.Enabled = !busy;
             _btnSettings.Enabled = !busy;
+            _btnClearLog.Enabled = !busy;
             Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
             if (busy)
             {
@@ -321,6 +389,39 @@ namespace KsefWinFormsApp
             {
                 _txtOutputPdfPath.Text = dialog.FileName;
             }
+        }
+
+        private void ClearLogClick(object? sender, EventArgs e)
+        {
+            _txtLog.Clear();
+            AppendLog("Log wyczyszczony.");
+        }
+
+        private void AppendLog(string message)
+        {
+            if (_txtLog.IsDisposed)
+            {
+                return;
+            }
+
+            if (_txtLog.InvokeRequired)
+            {
+                _txtLog.BeginInvoke(new Action<string>(AppendLog), message);
+                return;
+            }
+
+            var line = "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] " + message + Environment.NewLine;
+            _txtLog.AppendText(line);
+        }
+
+        private static string Truncate(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+            {
+                return value;
+            }
+
+            return value.Substring(0, maxLength) + "...";
         }
 
         private static string BuildConfigSummary(AppSettings settings)
