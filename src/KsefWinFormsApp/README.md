@@ -1,6 +1,6 @@
 # KsefWinFormsApp
 
-Minimalny projekt WinForms (VS2022) do pobrania faktury z KSeF po numerze KSeF i wygenerowania PDF.
+Minimalny projekt WinForms (.NET Framework 4.8, VS2019/VS2022) do pobrania faktury z KSeF po numerze KSeF i wygenerowania PDF.
 
 ## UI po zmianie
 
@@ -26,7 +26,7 @@ Ustawienia zapisują się do lokalnego pliku JSON:
 
 ## Uruchomienie
 
-1. Otwórz `KsefWinForms.sln` w VS2022.
+1. Otwórz `KsefWinForms.sln` w VS2019 lub VS2022.
 2. Przywróć NuGet packages.
 3. Ustaw `KsefWinFormsApp` jako startup project.
 4. W aplikacji kliknij `Ustawienia...` i uzupełnij dane integracyjne.
